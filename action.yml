@@ -1,0 +1,36 @@
+name: 'Verify SCIM identities for GitHub organization'
+description: 'An action to revoke unused GitHub credentials linked to a GitHub organization'
+branding:
+  icon: 'shield'
+  color: 'yellow'
+
+inputs:
+  gh_app_id:
+    description: 'GitHub App ID.'
+    required: true
+    type: string
+  gh_pem_key:
+    description: 'GitHub App PEM key.'
+    required: true
+    type: string
+  gh_install_id:
+    description: 'GitHub App installation ID.'
+    required: true
+    type: string
+  gh_org:
+    description: 'GitHub organization.'
+    required: true
+    type: string
+    default: ${{ github.repository_owner }}
+
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args: ['--no-color']
+  env:
+    GH_APP_ID: ${{ inputs.gh_app_id }}
+    GH_PEM_KEY: ${{ inputs.gh_pem_key }}
+    GH_INSTALL_ID: ${{ inputs.gh_install_id }}
+    GH_ORG: ${{ inputs.gh_org }}
+    COLUMNS: 200 # to avoid line wrapping or truncation of output
