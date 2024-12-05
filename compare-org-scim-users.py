@@ -1,20 +1,17 @@
-import datetime
 import logging
 import os
-import jwt
 import requests
 import argparse
-import base64
 from rich import print
 from rich.logging import RichHandler
 from rich.table import Table
 from rich import box
 from rich.console import Console
-from google.cloud import secretmanager_v1
 from gql import gql, Client
 from gql.transport.requests import RequestsHTTPTransport
 import sys
 from gql.transport.requests import log as requests_logger
+from typing import List
 
 requests_logger.setLevel(logging.WARNING)
 
@@ -36,9 +33,17 @@ class GHWrapper:
 
 
 
-    def __init__(self,  org, pat_token):
+    def __init__(self, org, pat_token):
+        if not org or not pat_token:
+            raise ValueError("Organization and PAT token are required")
         self.org = org
         self.pat_token = pat_token
+        self.session = requests.Session()  # Reuse connection
+        self.session.headers.update({
+            "Authorization": f"Bearer {pat_token}",
+            "Accept": "application/scim+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        })
 
     def list_org_scim_identities(self):
         """
@@ -94,12 +99,12 @@ class GHWrapper:
 
         return all_handles
 
-    def list_org_verified_emails(self):
+    def list_org_verified_emails(self) -> List[List[str]]:
         """
-        Get a list of the users emails in a specific GitHub organization
+        Get organization users' verified emails.
 
         Returns:
-            list: A list of the organization verified e-mails of the users in the organization
+            List[List[str]]: List of email lists for each user
         """
         # Select your transport with a defined url endpoint
         # Uses the GitHub PAT token
@@ -130,7 +135,7 @@ class GHWrapper:
         """
         )
 
-        variables = {"org": "nosportugal"}
+        variables = {"org": os.getenv("GH_ORG")}
 
         # Execute the query on the transport
         result = client.execute(query, variable_values=variables)
@@ -153,7 +158,7 @@ class GHWrapper:
                 logging.debug(f"Login: {login}, Name: {name}, E-mails: {emails}, Date Created: {date_created}, URL: {url}")
 
                 emails = [email.lower() for email in emails] # Lowercase all emails
-                if len(emails) > 0:
+                if len(emails) > 0: # Only add users with verified emails
                     all_emails.append(emails)
                 else:
                     logging.warning(f"[bold yellow]User {login} has no verified e-mails", extra={"markup": True})
@@ -179,7 +184,7 @@ class GHWrapper:
             """
             )
 
-            variables = {"org": "nosportugal", "cursor": cursor}
+            variables = {"org": os.getenv("GH_ORG"), "cursor": cursor}
 
             # Execute the query on the transport
             result = client.execute(query, variable_values=variables)
@@ -200,13 +205,15 @@ def parse_command_line_args(args_0=sys.argv[1:]):
 
 # Add validation for environment variables
 def validate_environment():
-    required_vars = ['GH_ORG', 'GH_PAT_TOKEN']
+    required_vars = ['GH_ORG', 'GH_PAT_TOKEN', ]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
 
-if __name__ == "__main__":
+def main():
+
+
     args = parse_command_line_args()
 
     FORMAT = "%(message)s"
@@ -224,23 +231,16 @@ if __name__ == "__main__":
     validate_environment()
 
     gh = GHWrapper(
-        app_id=os.getenv("GH_APP_ID"),
-        pem_key_path=os.getenv("GH_PEM_KEY_PATH"),
-        pem_key=os.getenv("GH_PEM_KEY"),
-        install_id=os.getenv("GH_INSTALL_ID"),
-        org=os.getenv("GH_ORG"),
         pat_token=os.getenv("GH_PAT_TOKEN"),
+        org=os.getenv("GH_ORG")
     )
 
     enterprise_members = gh.list_org_verified_emails()
     scim_identities = gh.list_org_scim_identities()
 
-
-    # Order each list alphabetically
     enterprise_members.sort()
     scim_identities.sort()
 
-    # Compare the two lists
 
     # Find the users that are in the enterprise members list but not in the scim identities list
 
@@ -268,3 +268,8 @@ if __name__ == "__main__":
         print("Users without SCIM ID:")
         for user in users_not_in_scim:
             print(str(user))
+
+
+
+if __name__ == "__main__":
+    main()
