@@ -1,53 +1,43 @@
-import datetime
 import logging
 import os
-import jwt
 import requests
 import argparse
-import base64
 from rich import print
 from rich.logging import RichHandler
 from rich.table import Table
 from rich import box
 from rich.console import Console
-from google.cloud import secretmanager_v1
 from gql import gql, Client
 from gql.transport.requests import RequestsHTTPTransport
 import sys
+from gql.transport.requests import log as requests_logger
+from typing import List , Tuple
+import datetime
+import base64
+import jwt
 
+requests_logger.setLevel(logging.WARNING)
 
 class GHWrapper:
     # This class is a wrapper around the GitHub REST API and GitHub GraphQL API to list enterprise members (GraphQL) and to check SCIM identities (REST API)
-    # The class uses the GitHub App authentication method to get a token with organization permissions to list the SCIM identities
-    # The class uses the GitHub Personal Access Token (PAT) authentication method to list the organization members (because it's at Enterpris level)
 
     # Github token permissions required from GitHub App:
     #   Organization:
     #       Administration: Read
     #       members: read
-    #   Repository: (this allows us to install the app on a specific repository)
-    #       Metadata: read
-
-    # To get the token, you need to set the following environment variables:
-    #   GH_APP_ID: the GitHub App ID
-    #   GH_PEM_KEY_PATH or GH_PEM_KEY: the path to the private key or the private key itself encoded in base64
-    #   GH_INSTALL_ID: the GitHub App installation ID
-    #   GH_ORG: the organization name
-
-    # Github token permissions required from GitHub PAT (Personal Access Token) at Enterprise level:
-    #   Organization:
-    #       Administration: Read
-    #       members: read
 
 
-    def __init__(self, app_id, pem_key_path, install_id, org, pat_token, pem_key=None):
+
+    def __init__(self, app_id, pem_key_path, install_id, org, pem_key=None):
+        if not org:
+            raise ValueError("Organization is required")
+
         self.app_id = app_id
         self.install_id = install_id
         self.pem_key_path = pem_key_path
         self.pem_key = pem_key
         self.token = self.get_gh_token()
         self.org = org
-        self.pat_token = pat_token
 
     def get_gh_token(self):
         """
@@ -109,12 +99,13 @@ class GHWrapper:
         Get a list of SCIM provisioned identities' GitHub handles
 
         Returns:
-            list: A list of GitHub handles (userNames) of the SCIM provisioned identities
+            list: A list of GitHub handles (emails) of the SCIM provisioned identities
         """
         url = f'https://api.github.com/scim/v2/organizations/{self.org}/Users'
         headers = {
             "Authorization": f"Bearer {self.token}", # Uses the GitHub app token
             "Accept": "application/scim+json",
+            "X-GitHub-Api-Version": "2022-11-28",
         }
         params = {
             "startIndex": 1,
@@ -137,7 +128,7 @@ class GHWrapper:
                 logging.error(
                     f"[bold red]Failed to get response from SCIM organization identities json: {response.text}",
                     extra={"markup": True}
-                )                
+                )
                 break
 
             resources = data.get("Resources", [])
@@ -145,10 +136,10 @@ class GHWrapper:
                 logging.error(
                     f"[bold red]Failed to get Resources block from SCIM organization identities json: {response.text}",
                     extra={"markup": True}
-                )  
+                )
                 break
 
-            handles = [resource["userName"] for resource in resources if "userName" in resource]
+            handles = [resource["userName"].lower() for resource in resources if "userName" in resource]
             all_handles.extend(handles)
             params["startIndex"] += params["count"]
 
@@ -157,16 +148,17 @@ class GHWrapper:
 
         return all_handles
 
-    def list_org_verified_emails(self):
+    def list_org_verified_emails(self) -> Tuple[dict, List]:
         """
-        Get a list of the users emails in a specific GitHub organization
+        Get organization users' verified emails.
 
         Returns:
-            list: A list of the organization verified e-mails of the users in the organization
+            Tuple[dict, List]: A tuple with the following:
+                - A dict with the users and their verified emails
+                - A list of users without verified emails
         """
         # Select your transport with a defined url endpoint
-        # Uses the GitHub PAT token
-        transport = RequestsHTTPTransport(url="https://api.github.com/graphql", headers={"Authorization": f"Bearer {self.pat_token}"})
+        transport = RequestsHTTPTransport(url="https://api.github.com/graphql", headers={"Authorization": f"Bearer {self.token}"})
 
         # Create a GraphQL client using the defined transport
         client = Client(transport=transport, fetch_schema_from_transport=True)
@@ -193,10 +185,15 @@ class GHWrapper:
         """
         )
 
-        variables = {"org": "nosportugal"}
+        variables = {"org": os.getenv("GH_ORG")}
 
         # Execute the query on the transport
         result = client.execute(query, variable_values=variables)
+
+        users = {
+                #   "user1" : ["email1", "email2"],
+        }
+        users_without_verified_email = []
 
         # Loop through all pages
         while result["organization"]["membersWithRole"]["edges"]:
@@ -205,11 +202,19 @@ class GHWrapper:
                 cursor = user["cursor"]
                 login = user["node"]["login"]
                 name = user["node"]["name"]
-                emails = str(user["node"]["organizationVerifiedDomainEmails"]).strip("[]").replace("'", "")
+                emails = user["node"]["organizationVerifiedDomainEmails"]
                 date_created = user["node"]["createdAt"]
                 url = user["node"]["url"]
 
-                print(f"Login: {login}, Name: {name}, E-mails: {emails}, Date Created: {date_created}, URL: {url}")
+
+                logging.debug(f"Login: {login}, Name: {name}, E-mails: {emails}, Date Created: {date_created}, URL: {url}")
+
+                emails = [email.lower() for email in emails] # Lowercase all emails
+                if len(emails) > 0: # Only add users with verified emails
+                    users[login] = emails
+                else:
+                    logging.info(f"[bold yellow]User {login} has no verified e-mails", extra={"markup": True})
+                    users_without_verified_email.append(login)
 
             query = gql(
                 """
@@ -232,11 +237,12 @@ class GHWrapper:
             """
             )
 
-            variables = {"org": "nosportugal", "cursor": cursor}
+            variables = {"org": os.getenv("GH_ORG"), "cursor": cursor}
 
             # Execute the query on the transport
             result = client.execute(query, variable_values=variables)
- 
+
+        return users , users_without_verified_email
 
 
 def parse_command_line_args(args_0=sys.argv[1:]):
@@ -246,10 +252,26 @@ def parse_command_line_args(args_0=sys.argv[1:]):
     arg_parser.add_argument("-o", "--out-format", type=str, default="table", help="Output format: table or txt")
     arg_parser.add_argument("--no-color", action="store_true", help="Disable color output")
 
+    args = arg_parser.parse_args(args_0)
+
     return args
 
+# Add validation for environment variables
+def validate_environment():
+    required_vars = ['GH_ORG', 'GH_APP_ID', 'GH_INSTALL_ID']
+    pem_key_vars = ['GH_PEM_KEY_PATH', 'GH_PEM_KEY']
 
-if __name__ == "__main__":
+    missing = [var for var in required_vars if not os.getenv(var)]
+
+    if not any(os.getenv(var) for var in pem_key_vars):
+        missing.extend(pem_key_vars)
+
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+
+def main():
+
+
     args = parse_command_line_args()
 
     FORMAT = "%(message)s"
@@ -264,16 +286,89 @@ if __name__ == "__main__":
 
     logging.debug(f"Arguments: {args}")
 
+    validate_environment()
+
     gh = GHWrapper(
         app_id=os.getenv("GH_APP_ID"),
         pem_key_path=os.getenv("GH_PEM_KEY_PATH"),
         pem_key=os.getenv("GH_PEM_KEY"),
         install_id=os.getenv("GH_INSTALL_ID"),
         org=os.getenv("GH_ORG"),
-        pat_token=os.getenv("GH_PAT_TOKEN"),
     )
 
-    enterprise_members = gh.list_org_verified_emails()
+    enterprise_members, unverified_members  = gh.list_org_verified_emails()
     scim_identities = gh.list_org_scim_identities()
 
+    scim_identities.sort()
 
+    # Find the users that are in the enterprise members list but not in the scim identities list
+
+    users_not_in_scim = {}
+
+    for user in enterprise_members:
+        present = False
+        for email in enterprise_members[user]:
+            if email in scim_identities:
+                present = True
+                break
+        if not present:
+            users_not_in_scim[user] = enterprise_members[user]
+
+    # Print the results
+    print_results(args, console, unverified_members, users_not_in_scim)
+
+    if "GITHUB_STEP_SUMMARY" in os.environ:
+        with console.capture() as capture:
+            print_results(args, console, unverified_members, users_not_in_scim)
+        output = capture.get()
+        with open(os.getenv("GITHUB_STEP_SUMMARY"), "a") as f:
+            print(output, file=f)
+
+def print_results(args, console, unverified_members, users_not_in_scim):
+    if args.out_format == "table":
+        if len(users_not_in_scim) > 0:
+            console.print("## Users without SCIM ID", style="bold red")
+            table = Table(title="", box=box.MARKDOWN)
+            table.add_column("User", style="bold")
+            table.add_column("E-mails", style="bold")
+            table.add_column("Org link", style="bold")
+            for user in users_not_in_scim:
+                table.add_row(str(user), " , ".join(users_not_in_scim[user]), f"https://github.com/orgs/{os.getenv('GH_ORG')}/people/{str(user)}/sso", style="yellow")
+            console.print(table)
+        else:
+            console.print("## All users have SCIM ID", style="bold green")
+
+        if len(unverified_members) > 0:
+            console.print("## Users without verified e-mails", style="bold red")
+            table2 = Table(title="", box=box.MARKDOWN)
+            table2.add_column("Username", style="bold")
+            table2.add_column("Org link", style="bold")
+            for user in unverified_members:
+                table2.add_row(str(user),f"https://github.com/orgs/{os.getenv('GH_ORG')}/people/{str(user)}/sso", style="yellow")
+                console.print(table2)
+        else:
+            console.print("## All users have verified e-mails", style="bold green")
+
+
+
+
+    elif args.out_format == "txt":
+        if len(users_not_in_scim) > 0:
+            console.print("Users without SCIM ID:")
+            for user in users_not_in_scim:
+                console.print(f"\t{user} : {users_not_in_scim[user]}")
+        else:
+            console.print("All users have SCIM ID")
+
+        if len(unverified_members) > 0:
+            console.print("Users without verified e-mails:")
+            for user in unverified_members:
+                console.print(f"\t{user}")
+        else:
+            console.print("All users have verified e-mails")
+
+
+
+
+if __name__ == "__main__":
+    main()
