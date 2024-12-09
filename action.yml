@@ -1,8 +1,9 @@
 name: 'Verify SCIM identities for GitHub organization'
-description: 'An action to revoke unused GitHub credentials linked to a GitHub organization'
+description: 'An action to verify drifts between SCIM identities and GitHub organization members.'
 branding:
   icon: 'shield'
   color: 'yellow'
+
 
 inputs:
   gh_app_id:
