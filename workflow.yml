@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Check GitHub SCIM Drifts
-        uses: tentwentyone/github-org-members-verify-scim-identities@v1.0.1
+        uses: tentwentyone/github-org-members-verify-scim-identities@v1.0.2
         with:
           gh_app_id: ${{ secrets.GH_APP_ORG_READ_ID }}
           gh_pem_key: ${{ secrets.GH_APP_ORG_READ_PEM_KEY }}

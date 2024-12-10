@@ -60,7 +60,17 @@ class GHWrapper:
 
         # check if pem_key is defined and decode it from base64
         if creds["pem_key"] is not None:
-            creds["pem_key"] = base64.b64decode(creds["pem_key"]).decode("utf-8")
+
+            #check if pem_key is base64 encoded
+            if creds["pem_key"].startswith("LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQ"):
+                logging.debug("pem key from encoded in base64")
+                creds["pem_key"] = base64.b64decode(creds["pem_key"]).decode("utf-8")
+            else:
+                logging.debug("pem key is in clear text")
+
+            #check if pem_key is a valid RSA key by checking the start and end of the key
+            if not creds["pem_key"].startswith("-----BEGIN RSA PRIVATE KEY-----") or not creds["pem_key"].endswith("-----END RSA PRIVATE KEY-----"):
+                raise Exception("GH_PEM_KEY is not a valid RSA key")
 
         # if pem_key is not defined, check if pem_key_path is defined and read the content of the file
         elif creds["pem_key"] is None and creds["pem_key_path"] is not None:
