@@ -65,12 +65,12 @@ python compare-org-scim-users.py [-o {table,txt}] [--no-color]]
 
 ```yaml
 - name: Compare SCIM Identities
-        uses: tentwentyone/github-org-members-verify-scim-identities@v1
+        uses: tentwentyone/github-org-members-verify-scim-identities@v1.0.1
         with:
           # GitHub App credentials
-          gh_app_id: ${{ secrets.GH_CRED_REVOKER_APP_ID }}
-          gh_pem_key: ${{ secrets.GH_CRED_REVOKER_PEM_KEY }}
-          gh_install_id: ${{ secrets.GH_CRED_REVOKER_INSTALL_ID }}
+          gh_app_id: ${{ secrets.GH_APP_ORG_READ_ID }}
+          gh_pem_key: ${{ secrets.GH_APP_ORG_READ_PEM_KEY }}
+          gh_install_id: ${{ secrets.GH_APP_ORG_READ_INSTALL_ID }}
 ```
 
 ### Output Format
