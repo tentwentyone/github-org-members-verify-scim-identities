@@ -45,7 +45,7 @@ This script helps you:
 - `GH_APP_ID`: GitHub App ID
 - `GH_INSTALL_ID`: GitHub App Installation ID
 - Either:
-  - `GH_PEM_KEY`: Base64 encoded private key
+  - `GH_PEM_KEY`: private key as plain text or base64 encoded
   - `GH_PEM_KEY_PATH`: Path to private key file
 
 ### Optional Arguments
@@ -65,7 +65,7 @@ python compare-org-scim-users.py [-o {table,txt}] [--no-color]]
 
 ```yaml
 - name: Compare SCIM Identities
-        uses: tentwentyone/github-org-members-verify-scim-identities@v1.0.1
+        uses: tentwentyone/github-org-members-verify-scim-identities@v1.0.2
         with:
           # GitHub App credentials
           gh_app_id: ${{ secrets.GH_APP_ORG_READ_ID }}
